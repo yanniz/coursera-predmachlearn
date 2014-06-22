@@ -1,0 +1,122 @@
+Prediction on Human Activity Class
+========================================================
+
+### Background
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this report, we will use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset). 
+
+The goal of this report is to predict the manner in which the participants did the exercise. This is the "classe" variable in the training set.
+
+### Data Preprocessing
+
+The training data for this project are available here: 
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data are available here: 
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+The data for this project come from this source: http://groupware.les.inf.puc-rio.br/har. 
+
+#### Load the Data
+
+Firstly, let us load the downloaded train and test data sets into R.
+
+```{r cache=TRUE}
+#setwd("~/Development/coursera-08-pracML/pml_proj")
+train <- read.csv("data/pml-training.csv")
+test <- read.csv("data/pml-testing.csv")
+```
+
+#### Explore the Variables
+```{r cache=TRUE}
+str(train)
+```
+
+#### Cross Validation Data Set
+For cross validation purpose, the training data set will be further split into 70% training dataset and 30% test dataset:
+```{r cache=TRUE}
+library(caret)
+set.seed(1234)
+inTrain <- createDataPartition(train$classe, list = FALSE, p = 0.7)
+training = train[inTrain, ]
+cv = train[-inTrain, ]
+```
+
+#### Preprocessing 
+
+We filter the columns with the class of outcome of "numeric". By doing so, we remove non-numeric variables since these variables including "X", "user_name", "new_window", "num_window", and "timestamp" do not seem to be good predictors. Noticing that we have missing values on some columns, we can use knnImpute which is faster. Also note that preProcess is done only for training. For cross validation, we use preProcValues generated from training data.
+
+```{r cache=TRUE}
+numeric_cols <- which(lapply(training, class) %in% c("numeric"))
+preProcValues <- preProcess(training[, numeric_cols], method = c("knnImpute"))
+# Methods are "BoxCox", "YeoJohnson", center", "scale",  "range", "knnImpute", "bagImpute", "pca", "ica" and "spatialSign"
+preProcValues
+```
+
+Apply them to training, cross validation and test data sets:
+
+```{r cache=TRUE}
+scaledTrain <- predict(preProcValues, training[, numeric_cols])
+scaledCV <- predict(preProcValues, cv[, numeric_cols])
+proc.test <- predict(preProcValues, test[, numeric_cols])
+```
+
+```{r cache=TRUE}
+#library(RANN)
+proc.training <- cbind(training$classe, scaledTrain)
+proc.cv <- cbind(cv$classe, scaledCV)
+```
+
+We also need to assign the name for the the first column.
+```{r cache=TRUE}
+names(proc.training)[1] <- c("classe")
+names(proc.cv)[1] <- c("classe")
+```
+
+Our pre-processed data are ready now, and we will train the model in the next step.
+
+### Build Random Forest Model
+
+#### Model Training
+After examining the data and the nature of this problem, we choose to build random forest model. Some benefits of Random Forest are
+- accuracy
+- not rely on linearity of the data
+- not require anything about independence of the features
+
+We use `randomForest` package. The first step is to tune randomForest for the optimal `mtry` parameter, which will start with the default value of `mtry`, search for the optimal value with respect to Out-of-Bag error estimate of `mtry` for randomForest.
+
+```{r, cache=TRUE}
+set.seed(1234)
+library(randomForest)
+training.res <- tuneRF(proc.training[,-1], proc.training[,1],stepFactor=1.5)
+```
+In the next step, we fit a RF model by setting ntree = 500 and mtry = 63. 
+
+```{r, cache=TRUE}
+set.seed(1234)
+rf <- randomForest(classe ~ ., proc.training, ntree = 500, mtry = 63)
+predtraining <- predict(rf, proc.training)
+print(confusionMatrix(predtraining, proc.training$classe))
+```
+Confusion Matrix on training data shows an accuracy of 100%
+
+#### Cross Validation
+In this section, we perform cross validation procedure to assess our model accuracy, it also helps reduce overfitting.
+
+```{r cache=TRUE}
+predcv <- predict(rf, proc.cv)
+print(confusionMatrix(predcv, proc.cv$classe))
+```
+The Confusion Matrix on cv data set shows an accuracy of 99%, so we do not need to prune the model further.
+
+### Prediction Results
+Finally, we apply the model on the testing data set.
+```{r cache=TRUE}
+pred.classe <- predict(rf, proc.test)
+pred.classe
+```
+
+### References
+[1] https://class.coursera.org/predmachlearn-002
+[2] http://groupware.les.inf.puc-rio.br/har#weight_lifting_exercises
+[3] http://www.stat.berkeley.edu/~breiman/RandomForests/cc_home.htm
+
